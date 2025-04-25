@@ -1,0 +1,1 @@
+# jpn_translate_drag_box
