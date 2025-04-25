@@ -12,14 +12,17 @@ from scipy.spatial import cKDTree
 class HotKeyManager:
     def __init__(self, set_lang = 'jpn'):
         self.lang = set_lang
+        self.kernel_size = 3
         keyboard.add_hotkey('esc', self.on_quit_program)
         self.drag_hotkey = 'ctrl+alt+q'
         self.lang_hotkey = 'ctrl+alt+e'
+        self.kernel_size_hotkey = 'ctrl+alt+k'
         # Set easyOCR reader
         # self.easy_reader = easyocr.Reader([self.convert_to_easy_lang(self.lang)], gpu=False)
         # Register the hotkey to trigger the 'on_initiate_drag' method
         keyboard.add_hotkey(f'{self.drag_hotkey}', self.on_initiate_drag)
         keyboard.add_hotkey(f'{self.lang_hotkey}', self.on_change_language)
+        keyboard.add_hotkey(f'{self.kernel_size_hotkey}', self.on_change_kernel_size)
         print(f"Hotkey listening... Press {self.drag_hotkey} to initiate the drag.")
         keyboard.wait()  # Keep the program running and waiting for hotkeys
 
@@ -41,6 +44,11 @@ class HotKeyManager:
     #         return 'en'
     #     if 'jpn' in code.lower():
     #         return 'ja'
+
+    def on_change_kernel_size(self):
+        input_str = input("Please type in a positive integer for kernel size")
+        if isinstance(input_str, str) and input_str.isdigit():
+            self.kernel_size = int(input_str)
 
     def create_drag_box(self):
         # Create the root window (transparent)
@@ -128,12 +136,12 @@ class HotKeyManager:
     def perform_ocr_jpn_vert(self, image):
         image_processed = self.process_image_for_ocr(image)
         bounding_boxes = self.gen_bounding_boxes(image_processed)
-        
+        bounding_boxes = self.merge_gen_bounding_boxes(image_processed, bounding_boxes)
 
     def gen_bounding_boxes(self, image_processed):
         image_processed = image_processed.convert("RGB")
         # try dilating before doing contours
-        dilation_size = 2
+        dilation_size = self.kernel_size
         dilation_iter = 2
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (dilation_size, dilation_size))
         dilated = cv2.dilate(np.array(image_processed), kernel, iterations=dilation_iter)
@@ -145,8 +153,8 @@ class HotKeyManager:
         bounding_boxes = []
 
         draw = ImageDraw.Draw(image_processed)
-        contour_thres = 10
 
+        contour_thres = 10
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             if w > contour_thres and h > contour_thres:  # Filter small contours (adjust threshold)
@@ -155,11 +163,72 @@ class HotKeyManager:
         image_processed.show()
 
         return bounding_boxes
+    
+    def merge_gen_bounding_boxes(self, image_processed, bounding_boxes):
+        bounding_boxes = merge_touching_boxes(bounding_boxes)
+        image_processed = image_processed.convert("RGB")
+        draw = ImageDraw.Draw(image_processed)  
+        for (x, y, w, h) in bounding_boxes:
+            draw.rectangle((x, y, x+w, y+h), outline="blue", width=2)
+        image_processed.show()
+
 
 def is_point_in_bbox(point, bbox):
     px, py = point
     x, y, w, h = bbox
     return x <= px <= x + w and y <= py <= y + h
+
+# merge boxes written by AI (chatgpt, Grok)
+def merge_touching_boxes(boxes, min_gap=0):
+    """Merge bounding boxes that overlap or touch, iteratively.
+    Args:
+        boxes: List of [x, y, w, h] where x, y is top-left, w, h is width, height.
+        min_gap: Allow boxes to be merged if gap between them is <= min_gap (pixels).
+    Returns:
+        List of merged [x, y, w, h] boxes.
+    """
+    if not boxes:
+        return []
+
+    def boxes_touch(box1, box2):
+        x1, y1, w1, h1 = box1
+        x2, y2, w2, h2 = box2
+        return (max(x1, x2) <= min(x1 + w1, x2 + w2) + min_gap and
+                max(y1, y2) <= min(y1 + h1, y2 + h2) + min_gap)
+
+    def merge_group(group_boxes):
+        x_min = min(b[0] for b in group_boxes)
+        y_min = min(b[1] for b in group_boxes)
+        x_max = max(b[0] + b[2] for b in group_boxes)
+        y_max = max(b[1] + b[3] for b in group_boxes)
+        return [x_min, y_min, x_max - x_min, y_max - y_min]
+
+    # Iteratively merge until no changes
+    current_boxes = boxes.copy()
+    while True:
+        groups = []
+        used = set()
+
+        # Group touching boxes
+        for i in range(len(current_boxes)):
+            if i not in used:
+                group = [i]
+                used.add(i)
+                for j in range(i + 1, len(current_boxes)):
+                    if j not in used and boxes_touch(current_boxes[i], current_boxes[j]):
+                        group.append(j)
+                        used.add(j)
+                groups.append(group)
+
+        # Create new list of merged boxes
+        new_boxes = [merge_group([current_boxes[i] for i in g]) for g in groups]
+
+        # If no boxes were merged (same number of boxes), we're done
+        if len(new_boxes) == len(current_boxes):
+            break
+        current_boxes = new_boxes
+
+    return current_boxes
 
 # Start the hotkey manager
 if len(sys.argv) < 2:
