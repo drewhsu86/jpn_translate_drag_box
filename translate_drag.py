@@ -2,27 +2,24 @@ import tkinter as tk
 import pyautogui
 import keyboard
 import sys
-import pytesseract
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 import numpy as np
 import cv2
 from scipy.spatial import cKDTree
+from deep_translator import GoogleTranslator
+# fix fugashi for manga_ocr: https://github.com/pypa/pip/issues/10605 (mecab dll)
+from manga_ocr import MangaOcr
 # import easyocr
 
 class HotKeyManager:
-    def __init__(self, set_lang = 'jpn'):
-        self.lang = set_lang
-        self.kernel_size = 3
+    def __init__(self):
+        self.mocr = MangaOcr()
         keyboard.add_hotkey('esc', self.on_quit_program)
         self.drag_hotkey = 'ctrl+alt+q'
-        self.lang_hotkey = 'ctrl+alt+e'
-        self.kernel_size_hotkey = 'ctrl+alt+k'
         # Set easyOCR reader
         # self.easy_reader = easyocr.Reader([self.convert_to_easy_lang(self.lang)], gpu=False)
         # Register the hotkey to trigger the 'on_initiate_drag' method
         keyboard.add_hotkey(f'{self.drag_hotkey}', self.on_initiate_drag)
-        keyboard.add_hotkey(f'{self.lang_hotkey}', self.on_change_language)
-        keyboard.add_hotkey(f'{self.kernel_size_hotkey}', self.on_change_kernel_size)
         print(f"Hotkey listening... Press {self.drag_hotkey} to initiate the drag.")
         keyboard.wait()  # Keep the program running and waiting for hotkeys
 
@@ -32,23 +29,6 @@ class HotKeyManager:
     def on_initiate_drag(self):
         print('Initiating drag box...')
         self.create_drag_box()
-
-    def on_change_language(self):
-        print("Available: eng, jpn")
-        new_lang = input("Please type in the code for your desired language: ")
-        self.lang = new_lang
-        # self.easy_reader = easyocr.Reader([self.convert_to_easy_lang(self.lang)], gpu=False)
-
-    # def convert_to_easy_lang(self, code):
-    #     if code.lower() == 'eng':
-    #         return 'en'
-    #     if 'jpn' in code.lower():
-    #         return 'ja'
-
-    def on_change_kernel_size(self):
-        input_str = input("Please type in a positive integer for kernel size")
-        if isinstance(input_str, str) and input_str.isdigit():
-            self.kernel_size = int(input_str)
 
     def create_drag_box(self):
         # Create the root window (transparent)
@@ -103,17 +83,6 @@ class HotKeyManager:
         # Run the Tkinter event loop
         root.mainloop()
     
-    def perform_ocr(self, image):
-        image_processed = self.process_image_for_ocr(image)
-        image_processed.show()
-        # Convert image to text
-        # easy_text = self.easy_reader.readtext(np.array(image_processed), detail=0, paragraph=True, decoder='greedy')
-        # text = ''.join(easy_text)
-        custom_config = r'--oem 3 --psm 6'
-        text = pytesseract.image_to_string(image_processed, lang=self.lang, config=custom_config)
-        print("Extracted text:", text)
-        return text
-    
     def process_image_for_ocr(self, image):
         scale_factor = 1.5
         # process image and use it to pull text
@@ -135,103 +104,37 @@ class HotKeyManager:
     
     def perform_ocr_jpn_vert(self, image):
         image_processed = self.process_image_for_ocr(image)
-        bounding_boxes = self.gen_bounding_boxes(image_processed)
-        bounding_boxes = self.merge_gen_bounding_boxes(image_processed, bounding_boxes)
+        text = self.mocr(image_processed)
+        print(text)
+        translated = GoogleTranslator(source='ja', target='en').translate(text)
+        self.popup_window_text(translated)
 
-    def gen_bounding_boxes(self, image_processed):
-        image_processed = image_processed.convert("RGB")
-        # try dilating before doing contours
-        dilation_size = self.kernel_size
-        dilation_iter = 2
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (dilation_size, dilation_size))
-        dilated = cv2.dilate(np.array(image_processed), kernel, iterations=dilation_iter)
+    def popup_window_text(self, text):
+        text_width = 300
+        text_height = 200
 
-        edges = cv2.Canny(dilated, threshold1=100, threshold2=200)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        window = tk.Tk()
+        window.title("Translation")
+        window.geometry(f"{text_width}x{text_height}")  # Set window size
 
-        # Calculate bounding boxes for contours
-        bounding_boxes = []
+        # Add a label to display text
+        text_label = tk.Label(window, 
+                              text=text, 
+                              font=("Arial", 12), 
+                              wraplength=int(0.8*text_width),  # Wrap text
+                              justify="center")
+        text_label.pack(pady=20)  # Add some padding
 
-        draw = ImageDraw.Draw(image_processed)
+        # Function to close the window
+        def close_window():
+            window.destroy()
 
-        contour_thres = 10
-        for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            if w > contour_thres and h > contour_thres:  # Filter small contours (adjust threshold)
-                bounding_boxes.append((x, y, w, h))
-                draw.rectangle((x, y, x+w, y+h), outline="red", width=2)
-        image_processed.show()
+        # Create a close button
+        close_button = tk.Button(window, text="Close", command=close_window)
+        close_button.pack(pady=20)  # Add some padding
 
-        return bounding_boxes
-    
-    def merge_gen_bounding_boxes(self, image_processed, bounding_boxes):
-        bounding_boxes = merge_touching_boxes(bounding_boxes)
-        image_processed = image_processed.convert("RGB")
-        draw = ImageDraw.Draw(image_processed)  
-        for (x, y, w, h) in bounding_boxes:
-            draw.rectangle((x, y, x+w, y+h), outline="blue", width=2)
-        image_processed.show()
-
-
-def is_point_in_bbox(point, bbox):
-    px, py = point
-    x, y, w, h = bbox
-    return x <= px <= x + w and y <= py <= y + h
-
-# merge boxes written by AI (chatgpt, Grok)
-def merge_touching_boxes(boxes, min_gap=0):
-    """Merge bounding boxes that overlap or touch, iteratively.
-    Args:
-        boxes: List of [x, y, w, h] where x, y is top-left, w, h is width, height.
-        min_gap: Allow boxes to be merged if gap between them is <= min_gap (pixels).
-    Returns:
-        List of merged [x, y, w, h] boxes.
-    """
-    if not boxes:
-        return []
-
-    def boxes_touch(box1, box2):
-        x1, y1, w1, h1 = box1
-        x2, y2, w2, h2 = box2
-        return (max(x1, x2) <= min(x1 + w1, x2 + w2) + min_gap and
-                max(y1, y2) <= min(y1 + h1, y2 + h2) + min_gap)
-
-    def merge_group(group_boxes):
-        x_min = min(b[0] for b in group_boxes)
-        y_min = min(b[1] for b in group_boxes)
-        x_max = max(b[0] + b[2] for b in group_boxes)
-        y_max = max(b[1] + b[3] for b in group_boxes)
-        return [x_min, y_min, x_max - x_min, y_max - y_min]
-
-    # Iteratively merge until no changes
-    current_boxes = boxes.copy()
-    while True:
-        groups = []
-        used = set()
-
-        # Group touching boxes
-        for i in range(len(current_boxes)):
-            if i not in used:
-                group = [i]
-                used.add(i)
-                for j in range(i + 1, len(current_boxes)):
-                    if j not in used and boxes_touch(current_boxes[i], current_boxes[j]):
-                        group.append(j)
-                        used.add(j)
-                groups.append(group)
-
-        # Create new list of merged boxes
-        new_boxes = [merge_group([current_boxes[i] for i in g]) for g in groups]
-
-        # If no boxes were merged (same number of boxes), we're done
-        if len(new_boxes) == len(current_boxes):
-            break
-        current_boxes = new_boxes
-
-    return current_boxes
+        # Start the main event loop
+        window.mainloop()
 
 # Start the hotkey manager
-if len(sys.argv) < 2:
-    HotKeyManager()
-else:
-    HotKeyManager(sys.argv[1])
+HotKeyManager()
