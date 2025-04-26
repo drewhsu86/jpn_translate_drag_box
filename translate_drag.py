@@ -84,23 +84,27 @@ class HotKeyManager:
         root.mainloop()
     
     def process_image_for_ocr(self, image):
-        scale_factor = 1.5
-        # process image and use it to pull text
-        img = np.array(image)
-        img = cv2.resize(img, None, fx=scale_factor, fy=scale_factor)
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        img = cv2.GaussianBlur(img, (3, 3), 0)
-        img = cv2.adaptiveThreshold(
-            img, 
-            maxValue=255, 
-            adaptiveMethod=cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-            thresholdType=cv2.THRESH_BINARY_INV,  # Invert for black text on white
-            blockSize=21, 
-            C=7
-        )
-        img_processed = Image.fromarray(img)
-        return img_processed
+        try:
+            scale_factor = 1.5
+            # process image and use it to pull text
+            img = np.array(image)
+            img = cv2.resize(img, None, fx=scale_factor, fy=scale_factor)
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.GaussianBlur(img, (3, 3), 0)
+            img = cv2.adaptiveThreshold(
+                img, 
+                maxValue=255, 
+                adaptiveMethod=cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                thresholdType=cv2.THRESH_BINARY_INV,  # Invert for black text on white
+                blockSize=21, 
+                C=7
+            )
+            img_processed = Image.fromarray(img)
+            return img_processed
+        except:
+            print('Error processing image, skipping...')
+            return image
     
     def perform_ocr_jpn_vert(self, image):
         image_processed = self.process_image_for_ocr(image)
@@ -110,8 +114,8 @@ class HotKeyManager:
         self.popup_window_text(translated)
 
     def popup_window_text(self, text):
-        text_width = 300
-        text_height = 200
+        text_width = 400
+        text_height = 300
 
         window = tk.Tk()
         window.title("Translation")
@@ -120,7 +124,7 @@ class HotKeyManager:
         # Add a label to display text
         text_label = tk.Label(window, 
                               text=text, 
-                              font=("Arial", 12), 
+                              font=("Arial", 20), 
                               wraplength=int(0.8*text_width),  # Wrap text
                               justify="center")
         text_label.pack(pady=20)  # Add some padding
@@ -128,12 +132,19 @@ class HotKeyManager:
         # Function to close the window
         def close_window():
             window.destroy()
+        
+        def close_window_hotkey(event=None):
+            window.destroy()
+            self.on_initiate_drag()
 
         # Create a close button
         close_button = tk.Button(window, text="Close", command=close_window)
         close_button.pack(pady=20)  # Add some padding
 
+        window.bind_all('<Alt-Control-q>', close_window_hotkey)
+
         # Start the main event loop
+        window.focus_force()
         window.mainloop()
 
 # Start the hotkey manager
