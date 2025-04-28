@@ -15,9 +15,14 @@ class HotKeyManager:
     def __init__(self):
         self.mocr = MangaOcr()
         keyboard.add_hotkey('esc', self.on_quit_program)
-        self.drag_hotkey = 'ctrl+alt+q'
+        self.drag_hotkey = 'q'
+        self.popup_control = 'q'
+        # self.mod_drag_hotkey = 'ctrl+alt+q'
+        # self.mod_popup_control = '<Alt-Control-q>'
+
         # Set easyOCR reader
         # self.easy_reader = easyocr.Reader([self.convert_to_easy_lang(self.lang)], gpu=False)
+
         # Register the hotkey to trigger the 'on_initiate_drag' method
         keyboard.add_hotkey(f'{self.drag_hotkey}', self.on_initiate_drag)
         print(f"Hotkey listening... Press {self.drag_hotkey} to initiate the drag.")
@@ -141,7 +146,7 @@ class HotKeyManager:
         close_button = tk.Button(window, text="Close", command=close_window)
         close_button.pack(pady=20)  # Add some padding
 
-        window.bind_all('<Alt-Control-q>', close_window_hotkey)
+        window.bind_all(self.popup_control, close_window_hotkey)
 
         # Start the main event loop
         window.focus_force()
